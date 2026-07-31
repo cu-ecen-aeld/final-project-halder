@@ -1,7 +1,7 @@
 # Embedded Linux System Monitoring Appliance on Raspberry Pi 4 Model B
 
 ## Project Overview
-Please check the Wiki: [Project Overview Page](https://github.com/cu-ecen-aeld/final-project-halder/wiki/Project-Overview)
+Please check the Wiki: [Project Overview page](https://github.com/cu-ecen-aeld/final-project-halder/wiki/Project-Overview) and the [Project Schedule page](https://github.com/users/halder/projects/2/views/1?groupedBy%5BcolumnId%5D=369428154) for the current status of the project.
 
 ## Build Configuration
 To restore the project configuration:
