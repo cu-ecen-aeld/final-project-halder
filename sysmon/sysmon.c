@@ -5,9 +5,13 @@
 
 #include <linux/ktime.h>    // Uptime
 #include <linux/mm.h>       // Memory usage
+#include <linux/utsname.h>  // Hostname
 #include <linux/thermal.h>  // CPU temp
+#include <linux/cpufreq.h>  // CPU frequency
 
 #include "sysmon.h"
+
+#define SYSMON_MINORS 1
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("halder");
@@ -28,9 +32,20 @@ static void sysmon_get_memory(struct sysmon_data *data)
 
     si_meminfo(&info);
     data->free_memory_bytes = info.freeram * info.mem_unit;
+    data->total_memory_bytes = info.totalram * info.mem_unit;
 }
 
-static int sysmon_get_temperature(struct sysmon_data *data)
+static void sysmon_get_hostname(struct sysmon_data *data)
+{
+    strscpy(data->hostname, utsname()->nodename, sizeof(data->hostname)); 
+}
+
+static void sysmon_get_cpu_frequency(struct sysmon_data *data)
+{
+    data->cpu_frequency_khz = cpufreq_get(0);
+}
+
+static int sysmon_get_cpu_temperature(struct sysmon_data *data)
 {
     struct thermal_zone_device *tz;
     int temp, status;
@@ -53,7 +68,9 @@ static int sysmon_collect_data(struct sysmon_data *data)
 
     sysmon_get_uptime(data);
     sysmon_get_memory(data);
-    status = sysmon_get_temperature(data);
+    sysmon_get_hostname(data);
+    sysmon_get_cpu_frequency(data);
+    status = sysmon_get_cpu_temperature(data);
 
     if (status)
         return status;
@@ -112,7 +129,7 @@ static int __init sysmon_init(void)
 {
     int status;
 
-    status = alloc_chrdev_region(&dev_nr, 0, MINORMASK + 1, "sysmon_device");
+    status = alloc_chrdev_region(&dev_nr, 0, SYSMON_MINORS, "sysmon_device");
     if (status) {
         printk(KERN_ERR "sysmon - Error registering cdev, could not register region of dev numbers\n");
         return status;
@@ -121,7 +138,7 @@ static int __init sysmon_init(void)
     cdev_init(&sysmon_dev.cdev, &fops);
     sysmon_dev.cdev.owner = THIS_MODULE;
 
-    status = cdev_add(&sysmon_dev.cdev, dev_nr, MINORMASK + 1);
+    status = cdev_add(&sysmon_dev.cdev, dev_nr, SYSMON_MINORS);
     if (status) {
         printk(KERN_ERR "sysmon - Error adding cdev within sysmon_device\n");
         goto free_dev_nr;
@@ -153,7 +170,7 @@ delete_cdev:
 delete_class:
     cdev_del(&sysmon_dev.cdev);
 free_dev_nr:
-    unregister_chrdev_region(dev_nr, MINORMASK + 1);
+    unregister_chrdev_region(dev_nr, SYSMON_MINORS);
     return status;
 }
 
@@ -164,7 +181,7 @@ static void __exit sysmon_exit(void)
     class_destroy(sysmon_class);
     cdev_del(&sysmon_dev.cdev);
     printk(KERN_INFO "sysmon - Chardev deleted\n");
-    unregister_chrdev_region(dev_nr, MINORMASK + 1);
+    unregister_chrdev_region(dev_nr, SYSMON_MINORS);
     printk(KERN_INFO "sysmon - Kernel module unloaded.\n");
 }
 

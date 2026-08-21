@@ -29,6 +29,9 @@ int main(void)
     printf("Read %zd bytes\n", bytes);
     printf("Uptime:          %lu\n", data.uptime_seconds);
     printf("Free memory:     %lu\n", data.free_memory_bytes);
+    printf("Total memory:    %lu\n", data.total_memory_bytes);
+    printf("Hostname:        %s\n", data.hostname);
+    printf("CPU frequency:   %ld\n", data.cpu_frequency_khz);
     printf("CPU temperature: %d\n", data.cpu_temperature_millicelsius);
 
     close(fd);
