@@ -2,6 +2,7 @@
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
+#include <linux/poll.h>
 
 #include <linux/ktime.h>    // Uptime
 #include <linux/mm.h>       // Memory usage
@@ -12,6 +13,7 @@
 #include "sysmon.h"
 
 #define SYSMON_MINORS 1
+#define SYSMON_INTERVAL_DEFAULT 10000 // 10 seconds
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("halder");
@@ -59,6 +61,7 @@ static int sysmon_get_cpu_temperature(struct sysmon_data *data)
         return status;
 
     data->cpu_temperature_millicelsius = temp;
+    
     return 0;
 }
 
@@ -82,17 +85,22 @@ static int sysmon_open(struct inode *inode, struct file *filp)
 {
     struct sysmon_device *dev;
     
+    /* What `container_of` basically means/does:
+     *
+     * "Given this pointer to a member, calculate the address of the struct that contains it."
+     * Here `inode->i_cdev` is a pointer to the `cdev` member.
+     */
     dev = container_of(inode->i_cdev, struct sysmon_device, cdev);
     filp->private_data = dev;
 
-    printk(KERN_DEBUG "sysmon - Opened sysmon device.\n");
+    printk(KERN_DEBUG "sysmon.open - Opened sysmon device.\n");
     
     return 0;
 }
 
 static int sysmon_release(struct inode *inode, struct file *filp)
 {
-    printk(KERN_DEBUG "sysmon - Closed sysmon device.\n");
+    printk(KERN_DEBUG "sysmon.release - Closed sysmon device.\n");
     return 0;
 }
 
@@ -100,38 +108,115 @@ static ssize_t sysmon_read(struct file *filp, char __user *buffer, size_t count,
 {
     struct sysmon_device *dev = filp->private_data;
 
-    if (*offset != 0)
-        return 0;
-
     if (count < sizeof(dev->data))
         return -EINVAL;
     
-    sysmon_collect_data(&dev->data);
-    
+    if (!dev->data_available) {
+        if (filp->f_flags & O_NONBLOCK) {
+            printk(KERN_ERR "sysmon.read - File is opened in non-blocking mode and no data is available\n");
+            return -EAGAIN;
+        }
+       
+        /* Userpace process which called `read` sleeps until data_available == true
+         * (vs. poll_wait which does not sleep)
+         */
+        if (wait_event_interruptible(dev->wait_queue, dev->data_available))
+            return -ERESTARTSYS;
+    }
+
     if (copy_to_user(buffer, &dev->data, sizeof(sysmon_dev.data)))
         return -EFAULT;
 
-    *offset += sizeof(dev->data);
-
-    printk(KERN_DEBUG "sysmon - Copied %zu bytes to user\n", sizeof(dev->data));
+    printk(KERN_DEBUG "sysmon.read - Copied %zu bytes to user\n", sizeof(dev->data));
     
+    dev->data_available = false;
+
     return sizeof(dev->data);
 }
 
+static long int sysmon_ioctl(struct file *filp, unsigned int cmd, unsigned long args)
+{
+    int interval;
+
+    printk(KERN_DEBUG "sysmon.ioctl - ioctl called with cmd: 0x%x and arg: %ld\n", cmd, args);
+    
+    struct sysmon_device *dev = filp->private_data;
+
+    switch (cmd) {
+        case SYSMON_SET_INTERVAL:
+            if (copy_from_user(&interval, (int __user *) args, sizeof(interval)))
+                return -EFAULT;
+
+            cancel_delayed_work_sync(&dev->update_work);
+            dev->update_interval_ms = interval;
+            schedule_delayed_work(&dev->update_work, msecs_to_jiffies(dev->update_interval_ms));
+
+            printk(KERN_INFO "sysmon.ioctl - Update interval is set to %d\n", sysmon_dev.update_interval_ms);
+            break;
+
+        default:
+            return -EOPNOTSUPP;
+    }
+
+    return 0;
+}
+
+static __poll_t sysmon_poll(struct file *filp, poll_table *wait)
+{
+    struct sysmon_device *dev = filp->private_data;
+    __poll_t mask = 0;
+
+    poll_wait(filp, &dev->wait_queue, wait);
+
+    if (dev->data_available)
+        mask |= EPOLLIN | EPOLLRDNORM;
+    
+    printk(KERN_DEBUG "sysmon.poll - Poll finished waiting\n");
+
+    return mask;
+}
+
+static void sysmon_work(struct work_struct *work)
+{
+    int status;
+
+    struct sysmon_device *dev = container_of(work, struct sysmon_device, update_work.work);
+
+    status = sysmon_collect_data(&dev->data);
+   
+    if (status == 0) {
+        printk(KERN_DEBUG "sysmon.work - Data is collected and ready for transfer to user space\n");
+        dev->data_available = true;
+        wake_up_interruptible(&dev->wait_queue);
+    }
+    
+    schedule_delayed_work(&dev->update_work, msecs_to_jiffies(dev->update_interval_ms));
+}
+
 static const struct file_operations fops = {
-    .owner   = THIS_MODULE,
-    .open    = sysmon_open,
-    .release = sysmon_release,
-    .read    = sysmon_read
+    .owner          = THIS_MODULE,
+    .open           = sysmon_open,
+    .release        = sysmon_release,
+    .read           = sysmon_read,
+    .unlocked_ioctl = sysmon_ioctl,
+    .poll           = sysmon_poll
 };
 
 static int __init sysmon_init(void)
 {
     int status;
 
+    sysmon_dev.update_interval_ms = SYSMON_INTERVAL_DEFAULT;
+    sysmon_dev.data_available = false;
+
+    init_waitqueue_head(&sysmon_dev.wait_queue);
+    INIT_DELAYED_WORK(&sysmon_dev.update_work, sysmon_work);
+
+    schedule_delayed_work(&sysmon_dev.update_work, msecs_to_jiffies(sysmon_dev.update_interval_ms));
+
     status = alloc_chrdev_region(&dev_nr, 0, SYSMON_MINORS, "sysmon_device");
     if (status) {
-        printk(KERN_ERR "sysmon - Error registering cdev, could not register region of dev numbers\n");
+        printk(KERN_ERR "sysmon.init - Error registering cdev, could not register region of dev numbers: %d\n", status);
         return status;
     }
     
@@ -140,27 +225,27 @@ static int __init sysmon_init(void)
 
     status = cdev_add(&sysmon_dev.cdev, dev_nr, SYSMON_MINORS);
     if (status) {
-        printk(KERN_ERR "sysmon - Error adding cdev within sysmon_device\n");
+        printk(KERN_ERR "sysmon.init - Error adding cdev within sysmon_device: %d\n", status);
         goto free_dev_nr;
     }
 
-    printk(KERN_INFO "sysmon - Registered cdev. Major device number %d, starting with Minor %d\n", MAJOR(dev_nr), MINOR(dev_nr));
+    printk(KERN_INFO "sysmon.init - Registered cdev. Major device number %d, starting with Minor %d\n", MAJOR(dev_nr), MINOR(dev_nr));
     
     sysmon_class = class_create("sysmon_class");
     if (!sysmon_class) {
-        printk(KERN_ERR "sysmon - Could not create class 'sysmon_class'\n");
+        printk(KERN_ERR "sysmon.init - Could not create class 'sysmon_class'\n");
         status = ENOMEM;
         goto delete_cdev;
     }
 
     if (!device_create(sysmon_class, NULL, dev_nr, NULL, "sysmon")) {
-        printk(KERN_ERR "sysmon - Could not create device 'sysmon'\n");
+        printk(KERN_ERR "sysmon.init - Could not create device 'sysmon'\n");
         status = ENOMEM;
         goto delete_class;
     }
 
-    printk(KERN_INFO "sysmon - Created device under /sys/class/sysmon_class/sysmon\n");
-    printk(KERN_DEBUG "sysmon - Kernel module sysmon.ko loaded.\n");
+    printk(KERN_INFO "sysmon.init - Created device under /sys/class/sysmon_class/sysmon\n");
+    printk(KERN_DEBUG "sysmon.init - Kernel module sysmon.ko loaded.\n");
 
     return 0;
         
@@ -176,13 +261,14 @@ free_dev_nr:
 
 static void __exit sysmon_exit(void)
 {
+    cancel_delayed_work_sync(&sysmon_dev.update_work);
     device_destroy(sysmon_class, dev_nr);
     class_unregister(sysmon_class);
     class_destroy(sysmon_class);
     cdev_del(&sysmon_dev.cdev);
-    printk(KERN_INFO "sysmon - Chardev deleted\n");
+    printk(KERN_INFO "sysmon.exit - Chardev deleted\n");
     unregister_chrdev_region(dev_nr, SYSMON_MINORS);
-    printk(KERN_INFO "sysmon - Kernel module unloaded.\n");
+    printk(KERN_INFO "sysmon.exit - Kernel module unloaded.\n");
 }
 
 

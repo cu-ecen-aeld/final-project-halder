@@ -4,9 +4,14 @@
 #ifdef __KERNEL__
 #include <linux/cdev.h>
 #include <linux/types.h>
+#include <asm-generic/ioctl.h>
+#include <linux/wait.h>
+#include <linux/workqueue.h>
 #else
 #include <stdint.h>
+#include <sys/ioctl.h>
 #endif
+
 
 #define SYSMON_HOSTNAME_LEN 64
 
@@ -20,12 +25,22 @@ struct sysmon_data
     char        hostname[SYSMON_HOSTNAME_LEN];
 };
 
+
+// Pick an arbitrary unused value from https://github.com/torvalds/linux/blob/master/Documentation/userspace-api/ioctl/ioctl-number.rst
+#define SYSMON_IOC_MAGIC 0x16
+#define SYSMON_SET_INTERVAL _IOW(SYSMON_IOC_MAGIC, 1, int)
+
+
 #ifdef __KERNEL__
 
 struct sysmon_device
 {
     struct cdev         cdev;
     struct sysmon_data  data;
+    int                 update_interval_ms;
+    bool                data_available;
+    wait_queue_head_t   wait_queue;
+    struct delayed_work update_work;
 };
 
 #endif /* __KERNEL__ */
