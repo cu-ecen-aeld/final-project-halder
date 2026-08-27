@@ -21,7 +21,6 @@ modules.order
 
 # Kernel build metadata
 .*.cmd
-*.d
 .tmp_versions/
 
 # C build artifacts
