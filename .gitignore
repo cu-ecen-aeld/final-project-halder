@@ -8,6 +8,7 @@ test/test_poll
 
 # Helper Scripts
 **/scp-to-pi
+sysmon/Makefile-manual
 
 # Kernel build artifacts
 *.o

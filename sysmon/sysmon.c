@@ -13,7 +13,7 @@
 #include "sysmon.h"
 
 #define SYSMON_MINORS 1
-#define SYSMON_INTERVAL_DEFAULT 10000 // 10 seconds
+#define SYSMON_INTERVAL_DEFAULT 10000 /* 10 seconds */
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("halder");
