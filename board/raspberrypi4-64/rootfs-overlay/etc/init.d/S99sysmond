@@ -1,0 +1,37 @@
+#!/bin/sh
+
+case "$1" in
+    start)
+        echo "Waiting for system clock synchronization (NTP)..."
+
+        timeout=60
+        while [ "$(date +%Y)" -lt 2020 ] && [ "$timeout" -gt 0 ]; do
+            sleep 1
+            timeout=$((timeout - 1))
+        done
+
+        if [ "$timeout" -eq 0 ]; then
+            echo "WARNING: NTP synchronization timed out"
+        fi
+
+        echo "Starting sysmon data gathering daemon"
+        start-stop-daemon --start -n sysmond --startas /usr/bin/sysmond
+        ;;
+    
+    stop)
+        echo "Stopping sysmon data gathering daemon"
+        start-stop-daemon --stop -n sysmond --signal TERM --retry 5
+        ;;
+    
+    restart)
+        "$0" stop
+        "$0" start
+        ;;
+
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
+
+exit 0

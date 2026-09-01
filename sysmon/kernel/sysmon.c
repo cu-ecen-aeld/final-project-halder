@@ -15,9 +15,11 @@
 #define SYSMON_MINORS 1
 #define SYSMON_INTERVAL_DEFAULT 10000 /* 10 seconds */
 
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("halder");
 MODULE_DESCRIPTION("CU Boulder ECEA 5307 Final Project - System Monitoring Kernel Module");
+
 
 static dev_t dev_nr;
 static struct class *sysmon_class;
@@ -68,7 +70,7 @@ static int sysmon_get_cpu_temperature(struct sysmon_data *data)
 static int sysmon_collect_data(struct sysmon_data *data)
 {
     int status;
-
+    
     sysmon_get_uptime(data);
     sysmon_get_memory(data);
     sysmon_get_hostname(data);
@@ -91,6 +93,17 @@ static int sysmon_open(struct inode *inode, struct file *filp)
      * Here `inode->i_cdev` is a pointer to the `cdev` member.
      */
     dev = container_of(inode->i_cdev, struct sysmon_device, cdev);
+
+    mutex_lock(&dev->open_lock);
+    if (dev->is_opened) {
+        mutex_unlock(&dev->open_lock);
+        printk(KERN_ERR "sysmon.open - Sysmon device is already open in another process.\n");
+        return -EBUSY;
+    }
+
+    dev->is_opened = true;
+    mutex_unlock(&dev->open_lock);
+
     filp->private_data = dev;
 
     printk(KERN_DEBUG "sysmon.open - Opened sysmon device.\n");
@@ -100,7 +113,14 @@ static int sysmon_open(struct inode *inode, struct file *filp)
 
 static int sysmon_release(struct inode *inode, struct file *filp)
 {
+    struct sysmon_device *dev = filp->private_data;
+
+    mutex_lock(&dev->open_lock);
+    dev->is_opened = false;
+    mutex_unlock(&dev->open_lock);
+
     printk(KERN_DEBUG "sysmon.release - Closed sysmon device.\n");
+
     return 0;
 }
 
@@ -110,26 +130,37 @@ static ssize_t sysmon_read(struct file *filp, char __user *buffer, size_t count,
 
     if (count < sizeof(dev->data))
         return -EINVAL;
-    
-    if (!dev->data_available) {
+   
+    for (;;) {
+        mutex_lock(&dev->data_lock);
+
+        if (dev->data_available)
+            break;
+
+        mutex_unlock(&dev->data_lock);
+
         if (filp->f_flags & O_NONBLOCK) {
             printk(KERN_ERR "sysmon.read - File is opened in non-blocking mode and no data is available\n");
             return -EAGAIN;
         }
-       
+        
         /* Userpace process which called `read` sleeps until data_available == true
          * (vs. poll_wait which does not sleep)
          */
-        if (wait_event_interruptible(dev->wait_queue, dev->data_available))
+        if (wait_event_interruptible(dev->wait_queue, READ_ONCE(dev->data_available)))
             return -ERESTARTSYS;
     }
 
-    if (copy_to_user(buffer, &dev->data, sizeof(sysmon_dev.data)))
+    if (copy_to_user(buffer, &dev->data, sizeof(dev->data))) {
+        mutex_unlock(&dev->data_lock);
         return -EFAULT;
+    }
 
     printk(KERN_DEBUG "sysmon.read - Copied %zu bytes to user\n", sizeof(dev->data));
     
     dev->data_available = false;
+    
+    mutex_unlock(&dev->data_lock);
 
     return sizeof(dev->data);
 }
@@ -148,8 +179,13 @@ static long int sysmon_ioctl(struct file *filp, unsigned int cmd, unsigned long 
                 return -EFAULT;
 
             cancel_delayed_work_sync(&dev->update_work);
+
+            mutex_lock(&dev->data_lock);
+
             dev->update_interval_ms = interval;
             schedule_delayed_work(&dev->update_work, msecs_to_jiffies(dev->update_interval_ms));
+
+            mutex_unlock(&dev->data_lock);
 
             printk(KERN_INFO "sysmon.ioctl - Update interval is set to %d\n", sysmon_dev.update_interval_ms);
             break;
@@ -168,9 +204,13 @@ static __poll_t sysmon_poll(struct file *filp, poll_table *wait)
 
     poll_wait(filp, &dev->wait_queue, wait);
 
+    mutex_lock(&dev->data_lock);
+
     if (dev->data_available)
         mask |= EPOLLIN | EPOLLRDNORM;
     
+    mutex_unlock(&dev->data_lock);
+
     printk(KERN_DEBUG "sysmon.poll - Poll finished waiting\n");
 
     return mask;
@@ -182,15 +222,25 @@ static void sysmon_work(struct work_struct *work)
 
     struct sysmon_device *dev = container_of(work, struct sysmon_device, update_work.work);
 
+    mutex_lock(&dev->data_lock);
+
     status = sysmon_collect_data(&dev->data);
-   
+
+    if (status == 0)
+        dev->data_available = true;
+  
+    mutex_unlock(&dev->data_lock);
+
     if (status == 0) {
         printk(KERN_DEBUG "sysmon.work - Data is collected and ready for transfer to user space\n");
-        dev->data_available = true;
         wake_up_interruptible(&dev->wait_queue);
     }
     
+    mutex_lock(&dev->data_lock);
+
     schedule_delayed_work(&dev->update_work, msecs_to_jiffies(dev->update_interval_ms));
+    
+    mutex_unlock(&dev->data_lock);
 }
 
 static const struct file_operations fops = {
@@ -209,10 +259,12 @@ static int __init sysmon_init(void)
     sysmon_dev.update_interval_ms = SYSMON_INTERVAL_DEFAULT;
     sysmon_dev.data_available = false;
 
+    mutex_init(&sysmon_dev.data_lock);
+    mutex_init(&sysmon_dev.open_lock);
+    sysmon_dev.is_opened = false;
+
     init_waitqueue_head(&sysmon_dev.wait_queue);
     INIT_DELAYED_WORK(&sysmon_dev.update_work, sysmon_work);
-
-    schedule_delayed_work(&sysmon_dev.update_work, msecs_to_jiffies(sysmon_dev.update_interval_ms));
 
     status = alloc_chrdev_region(&dev_nr, 0, SYSMON_MINORS, "sysmon_device");
     if (status) {
@@ -246,6 +298,8 @@ static int __init sysmon_init(void)
 
     printk(KERN_INFO "sysmon.init - Created device under /sys/class/sysmon_class/sysmon\n");
     printk(KERN_DEBUG "sysmon.init - Kernel module sysmon.ko loaded.\n");
+
+    schedule_delayed_work(&sysmon_dev.update_work, msecs_to_jiffies(sysmon_dev.update_interval_ms));
 
     return 0;
         

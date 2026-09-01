@@ -7,6 +7,7 @@
 #include <asm-generic/ioctl.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
+#include <linux/mutex.h>
 #else
 #include <stdint.h>
 #include <sys/ioctl.h>
@@ -22,6 +23,7 @@ struct sysmon_data
     uint64_t    total_memory_bytes;
     int32_t     cpu_temperature_millicelsius;
     uint64_t    cpu_frequency_khz;
+
     char        hostname[SYSMON_HOSTNAME_LEN];
 };
 
@@ -37,8 +39,14 @@ struct sysmon_device
 {
     struct cdev         cdev;
     struct sysmon_data  data;
-    int                 update_interval_ms;
+
+    struct mutex        data_lock;
     bool                data_available;
+    
+    struct mutex        open_lock;
+    bool                is_opened;
+
+    int                 update_interval_ms;
     wait_queue_head_t   wait_queue;
     struct delayed_work update_work;
 };
