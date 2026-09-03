@@ -1,0 +1,49 @@
+from collections import deque
+from datetime import datetime
+
+from flask import Flask
+from flask import jsonify
+from flask import render_template
+
+
+app = Flask(__name__)
+TODAY_STR = datetime.today().strftime("%Y%m%d")
+
+def tail(filename, n=10):
+    """Return the last n lines of a file
+    
+    Line schema:
+    * timestamp,uptime_seconds,free_memory_bytes,total_memory_bytes,cpu_temperature_millicelsius,cpu_frequency_khz,hostname\n"
+    * idx 0    ,idx 1         ,idx 2            ,idx 3             ,idx 4                       ,idx 5            ,idx 6
+    """
+    return list(deque(open(filename, "r"), n))
+
+@app.route("/")
+def index():
+    return render_template("index.html") 
+
+@app.route("/api/data")
+def get_sysmon_data():
+    last_n_entries = tail(f"/var/lib/sysmon/{TODAY_STR}.csv")
+
+    entries = [entry.strip().split(",") for entry in last_n_entries]
+    
+    response = []
+    for entry in entries:
+        resp_dict = {
+            "timestamp": entry[0],
+            "uptime_seconds": int(entry[1]),
+            "free_memory_mib": int(entry[2]) / (1024 ** 2),
+            "memory_in_use": int(entry[2]) / int(entry[3]) * 100,
+            "cpu_temp_celsius": int(entry[4]) / 1000,
+            "cpu_freq_khz": int(entry[5]),
+            "hostname": entry[6]
+        }
+
+        response.append(resp_dict)
+
+    return jsonify(response)
+        
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+        <title>Raspberry Pi System Monitor</title>
+</head>
+<body>
+        <h1>CU Boulder ECEA 5307 Final Project: Embedded System Monitoring WebApp</h1>
+
+        <table border="1">
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>Uptime Seconds</th>
+                <th>Memory In Use (%)</th>
+                <th>Free Memory (MiB)</th>
+                <th>CPU Temperature (°C)</th>
+                <th>CPU Frequency (MHz)</th>
+                <th>Hostname</th>
+            </tr>
+        </thead>
+
+        <tbody id="data-table">
+            <!-- JavaScript will put the rows here -->
+        </tbody>
+    </table>
+
+    <footer>
+        <p>
+            Hostname: <span id="hostname">--</span>
+            |
+            Uptime: <span id="uptime">--</span>
+        </p>
+    </footer>
+
+
+    <script>
+        function formatUptime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            seconds %= 3600;
+
+            const minutes = Math.floor(seconds / 60);
+            seconds %= 60;
+
+            return `${hours} hours ${minutes} minutes ${seconds} seconds`
+        }
+
+        async function updateDashboard() {
+            const response = await fetch("/api/data");
+            const data = await response.json();
+
+            const table = document.getElementById("data-table");
+
+            // Clear existing rows
+            table.innerHTML = "";
+
+            const latest = data[data.length - 1];
+
+            document.getElementById("hostname").textContext = latest.hostname;
+            document.getElementById("uptime").textContext = formatUptime(latest.uptime_seconds);
+
+            // Last entry is newest, so iterate backwards
+            for (let i = data.length - 1; i >= 0; i--) {
+                const entry = data[i];
+
+                const row = table.insertRow();
+
+                row.insertCell().textContent = entry.timestamp;
+                row.insertCell().textContent = entry.uptime_seconds;
+                row.insertCell().textContent = entry.memory_in_use.toFixed(2);
+                row.insertCell().textContent = entry.free_memory_mib.toFixed(2);
+                row.insertCell().textContent = entry.cpu_temp_celsius.toFixed(2);
+                row.insertCell().textContent = (entry.cpu_freq_khz / 1e3).toFixed(2);
+                row.insertCell().textContent = entry.hostname;
+            }
+        }
+
+        updateDashboard();
+        setInterval(updateDashboard, 1000);
+    </script>
+</body>
+</html>

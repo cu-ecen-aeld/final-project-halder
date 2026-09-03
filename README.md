@@ -44,9 +44,9 @@ Look for `sdb`, `sdc` or similar with the correct size.
 
 **2 Unmount SD Card**
 ```bash
-sudo umount /dev/sdX1    # X == whatever you identified to be your SD card
+sudo umount /dev/sdX1   # X == whatever you identified to be your SD card
 sudo umount /dev/sdX2
-lsblk               # make sure the device is unmounted
+lsblk                   # make sure the device is unmounted
 ```
 
 **3 Flash Image**
