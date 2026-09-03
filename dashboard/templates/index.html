@@ -53,10 +53,14 @@
             // Clear existing rows
             table.innerHTML = "";
 
+            if (data.length === 0) {
+                return;
+            }
+        
             const latest = data[data.length - 1];
 
-            document.getElementById("hostname").textContext = latest.hostname;
-            document.getElementById("uptime").textContext = formatUptime(latest.uptime_seconds);
+            document.getElementById("hostname").textContent = latest.hostname;
+            document.getElementById("uptime").textContent = formatUptime(latest.uptime_seconds);
 
             // Last entry is newest, so iterate backwards
             for (let i = data.length - 1; i >= 0; i--) {
