@@ -5,6 +5,7 @@ board/raspberrypi4-64/rootfs-overlay/etc/wpa_supplicant.conf
 test/test_sysmon_data
 test/test_ioctl
 test/test_poll
+test/test_dashboard_load
 
 # Helper Scripts
 **/scp-to-pi

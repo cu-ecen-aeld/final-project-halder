@@ -7,9 +7,11 @@ from flask import render_template
 
 
 app = Flask(__name__)
+
+SYSMON_DATA_PATH = "/var/lib/sysmon"
 TODAY_STR = datetime.today().strftime("%Y%m%d")
 
-def tail(filename, n=10):
+def tail(filename, n=60):
     """Return the last n lines of a file
     
     Line schema:
@@ -24,19 +26,24 @@ def index():
 
 @app.route("/api/data")
 def get_sysmon_data():
-    last_n_entries = tail(f"/var/lib/sysmon/{TODAY_STR}.csv")
+    last_n_entries = tail(f"{SYSMON_DATA_PATH}/{TODAY_STR}.csv")
 
     entries = [entry.strip().split(",") for entry in last_n_entries]
     
     response = []
     for entry in entries:
+        free_memory = int(entry[2])
+        total_memory = int(entry[3])
+        cpu_temp = int(entry[4])
+        cpu_freq = int(entry[5])
+
         resp_dict = {
             "timestamp": entry[0],
             "uptime_seconds": int(entry[1]),
-            "free_memory_mib": int(entry[2]) / (1024 ** 2),
-            "memory_in_use": int(entry[2]) / int(entry[3]) * 100,
-            "cpu_temp_celsius": int(entry[4]) / 1000,
-            "cpu_freq_khz": int(entry[5]),
+            "free_memory_mib": free_memory / (1024 ** 2),
+            "memory_in_use": (total_memory - free_memory) / total_memory * 100,
+            "cpu_temp_celsius": cpu_temp / 1000,
+            "cpu_freq_mhz": cpu_freq / 1000,
             "hostname": entry[6]
         }
 
