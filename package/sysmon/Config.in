@@ -1,4 +1,4 @@
 config BR2_PACKAGE_SYSMON
-    bool "sysmon kernel module and daemon"
+    bool "sysmon kernel module, daemon & dashboard"
     help
         System monitoring kernel module for Raspberry Pi 4.

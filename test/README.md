@@ -5,7 +5,7 @@ These are minimal scripts for manual testing of the sysmon kernel module functio
 In order to run the tests, `scp` the compiled files onto the Raspberry Pi 4 target with the `sysmon` kernel module running:
 ```bash
 make
-scp test_sysmon_data test_ioctl test_poll <user>@<raspberrypi4-ip-addr>:/tmp/
+scp test_sysmon_data test_ioctl test_poll test_dashboard_load <user>@<raspberrypi4-ip-addr>:/tmp/
 ```
 
 Then on the Pi run:
@@ -13,9 +13,10 @@ Then on the Pi run:
 ./tmp/test_sysmon_data
 ./tmp/test_ioctl
 ./tmp/test_poll
+./tmp/test_dashboard_load
 ```
 
-Verify the test script output against the kernel messages:
+Verify the test script output against the kernel messages (or check the web app dashboard for `test_dashboard_load`):
 ```
 dmesg | tail -n10
 ```

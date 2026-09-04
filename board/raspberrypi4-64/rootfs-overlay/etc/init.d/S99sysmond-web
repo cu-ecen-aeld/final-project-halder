@@ -1,0 +1,28 @@
+#!/bin/sh
+
+case "$1" in
+    start)
+        echo "Starting sysmon dashboard"
+        start-stop-daemon --start -n sysmon-dashboard \
+            --startas /usr/bin/python3 \
+            -- /usr/share/sysmon/dashboard/app.py
+        ;;
+
+    stop)
+        echo "Stopping sysmon dashboard"
+        start-stop-daemon --stop -n sysmon-dashboard --signal TERM --retry 5
+        ;;
+
+    restart)
+        "$0" stop
+        "$0" start
+        ;;
+
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
+
+exit 0
+

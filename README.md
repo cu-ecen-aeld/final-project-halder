@@ -35,25 +35,30 @@ make
 ## Flash Image Onto SD Card
 After building the image, you need to flash it onto your micro SD card.
 
-**1 Identify SD Card**
+**1) Identify SD Card**
 ```bash
 lsblk
 ```
 
 Look for `sdb`, `sdc` or similar with the correct size.
 
-**2 Unmount SD Card**
+**2) Unmount SD Card**
 ```bash
 sudo umount /dev/sdX1   # X == whatever you identified to be your SD card
 sudo umount /dev/sdX2
 lsblk                   # make sure the device is unmounted
 ```
 
-**3 Flash Image**
+**3) Flash Image**
 ```bash
 sudo dd if=buildroot/output/images/sdcard.img of=/dev/sdX bs=4M status=progress conv=fsync  # replace sdX with correct SD card identifier
 sync
 ```
+
+### System Monitoring Dashboard
+From within your local network, open a web browser and go to `http://pi-sysmon:5000`.
+
+You can use `test_dashboard_load` to simulate actual workload on the RPi and monitor changes in temperature, memory & CPU usage in real time. See [test/README.md](test/README.md) for how to get the test scripts onto the RPi.
 
 ## Network Configuration Notes
 The default network configuration enables both Ethernet (`eth0`) and WiFi (`wlan0`).
